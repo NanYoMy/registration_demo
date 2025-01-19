@@ -1,5 +1,6 @@
 import SimpleITK as sitk
 import os
+import numpy as np
 
 def extract_2d_slice(image, slice_index=None):
     """从3D图像中提取中间切片"""
@@ -29,6 +30,22 @@ def process_mask(mask):
     
     # 转换为整数类型（0和1）
     return sitk.Cast(combined_mask, sitk.sitkUInt8)
+
+def normalize_image(image):
+    """将图像归一化到0到255"""
+    image_array = sitk.GetArrayFromImage(image)
+    min_val = image_array.min()
+    max_val = image_array.max()
+    
+    # 避免除以零
+    if max_val - min_val == 0:
+        return image
+    
+    # 归一化到0-255
+    normalized_array = 255 * (image_array - min_val) / (max_val - min_val)
+    normalized_image = sitk.GetImageFromArray(normalized_array.astype(np.float32))  # 保持为浮点类型
+    normalized_image.CopyInformation(image)  # 复制图像信息
+    return normalized_image
 
 def perform_rigid_registration(fixed_image, moving_image, fixed_mask=None, moving_mask=None):
     """执行刚性配准，只使用mask进行配准"""
@@ -83,14 +100,15 @@ def perform_bspline_registration(fixed_image, moving_image, initial_transform, f
     fixed_image = sitk.Cast(fixed_image, sitk.sitkFloat32)
     moving_image = sitk.Cast(moving_image, sitk.sitkFloat32)
     
+    # 归一化图像到0-255
+    fixed_image = normalize_image(fixed_image)
+    moving_image = normalize_image(moving_image)
+    
     # 确保mask也是浮点类型
     if fixed_mask is not None:
         fixed_mask = sitk.Cast(fixed_mask, sitk.sitkFloat32)
     if moving_mask is not None:
         moving_mask = sitk.Cast(moving_mask, sitk.sitkFloat32)
-
-    # 对移动图像进行平移，避免最小值为0
-    moving_image += 1.0  # 将所有值加1，避免为0
 
     # 打印输入图像和mask的信息
     print(f"Fixed Image Size: {fixed_image.GetSize()}, Type: {fixed_image.GetPixelIDTypeAsString()}, Min: {sitk.GetArrayFromImage(fixed_image).min()}, Max: {sitk.GetArrayFromImage(fixed_image).max()}")
@@ -100,10 +118,14 @@ def perform_bspline_registration(fixed_image, moving_image, initial_transform, f
     if moving_mask is not None:
         print(f"Moving Mask Size: {moving_mask.GetSize()}, Type: {moving_mask.GetPixelIDTypeAsString()}, Min: {sitk.GetArrayFromImage(moving_mask).min()}, Max: {sitk.GetArrayFromImage(moving_mask).max()}")
 
+    # 检查输入图像和mask的维度
+    if fixed_image.GetDimension() != 2 or moving_image.GetDimension() != 2:
+        raise ValueError("Both fixed and moving images must be 2D.")
+
     registration_method = sitk.ImageRegistrationMethod()
 
     # 设置相似度度量为均方误差
-    registration_method.SetMetricAsMeanSquares()
+    registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
     
     # 如果提供了mask，设置mask
     if fixed_mask is not None and moving_mask is not None:
@@ -111,7 +133,7 @@ def perform_bspline_registration(fixed_image, moving_image, initial_transform, f
         registration_method.SetMetricMovingMask(moving_mask)
 
     # 设置B样条变换
-    mesh_size = [max(3, int(sz/8)) for sz in fixed_image.GetSize()[:2]]
+    mesh_size = [max(3, int(sz/16)) for sz in fixed_image.GetSize()[:2]]
     transform = sitk.BSplineTransformInitializer(fixed_image, mesh_size, order=3)
     
     # 将刚性变换的结果作为初始变换
@@ -208,17 +230,29 @@ def register_images(fixed_image_path, moving_image_path, fixed_mask_path=None, m
         
         # 保存刚性配准结果
         sitk.WriteImage(rigid_result, f"{base}_rigid_slice{slice_index}.nii{ext}")
-    
+        
     # 2. 再进行B样条FFD配准
-    final_transform = perform_bspline_registration(fixed_image, moving_image, rigid_transform, fixed_mask, moving_mask)
+    final_transform, final_metric = perform_bspline_registration(fixed_image, moving_image, rigid_transform, fixed_mask, moving_mask)
 
     # 重采样移动图像
     resampler = sitk.ResampleImageFilter()
     resampler.SetReferenceImage(fixed_image)
     resampler.SetInterpolator(sitk.sitkLinear)
     resampler.SetTransform(final_transform)
-    
-    registered_image = resampler.Execute(moving_image)
+    transformed_moving_image = resampler.Execute(moving_image)
+
+    # 重采样移动mask
+    if moving_mask is not None:
+        mask_resampler = sitk.ResampleImageFilter()
+        mask_resampler.SetReferenceImage(fixed_image)
+        mask_resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+        mask_resampler.SetTransform(final_transform)
+        transformed_moving_mask = mask_resampler.Execute(moving_mask)
+        
+        # 保存变换后的mask
+        output_mask_path = f"transformed_{os.path.basename(moving_mask.GetOrigin())}.nii.gz"
+        sitk.WriteImage(transformed_moving_mask, output_mask_path)
+        print(f"Transformed moving mask saved to: {output_mask_path}")
 
     # 保存最终结果
     if output_path:
@@ -227,10 +261,10 @@ def register_images(fixed_image_path, moving_image_path, fixed_mask_path=None, m
             base, _ = os.path.splitext(base)
         output_2d_path = f"{base}_slice{slice_index}.nii{ext}"
         
-        sitk.WriteImage(registered_image, output_2d_path)
+        sitk.WriteImage(transformed_moving_image, output_2d_path)
         print(f"Registered 2D image saved to: {output_2d_path}")
     
-    return registered_image, final_transform
+    return transformed_moving_image, final_transform
 
 def main():
     # 设置路径
