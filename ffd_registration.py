@@ -41,6 +41,11 @@ def perform_bspline_registration(fixed_image, moving_image, fixed_mask=None, mov
     # 设置相似度度量为互信息
     registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
     
+    # 如果提供了mask，设置mask
+    if fixed_mask is not None and moving_mask is not None:
+        registration_method.SetMetricFixedMask(fixed_mask)
+        registration_method.SetMetricMovingMask(moving_mask)
+
     # 设置B样条变换
     mesh_size = [max(3, int(sz/8)) for sz in fixed_image.GetSize()[:2]]
     transform = sitk.BSplineTransformInitializer(fixed_image, mesh_size, order=3)
@@ -86,11 +91,11 @@ def perform_bspline_registration(fixed_image, moving_image, fixed_mask=None, mov
         transformed_moving_mask = mask_resampler.Execute(moving_mask)
         
         # 保存变换后的mask
-        output_mask_path = f"transformed_{os.path.basename(moving_mask.GetOrigin())}.nii.gz"
-        sitk.WriteImage(transformed_moving_mask, output_mask_path)
-        print(f"Transformed moving mask saved to: {output_mask_path}")
+        # output_mask_path = f"transformed_{os.path.basename(moving_mask.GetOrigin())}.nii.gz"
+        # sitk.WriteImage(transformed_moving_mask, output_mask_path)
+        # print(f"Transformed moving mask saved to: {output_mask_path}")
 
-    return transformed_moving_image, final_transform
+    return transformed_moving_image,transformed_moving_mask, final_transform
 
 
 def main():
@@ -100,8 +105,8 @@ def main():
         'registered_sub2092_t2mapt2_rigid_slice0.nii.gz'
     ]
     moving_mask_paths = [
-        'registered_sub2092_nativet1mapt1_rigid_slice0_mask.nii.gz',
-        'registered_sub2092_t2mapt2_rigid_slice0_mask.nii.gz'
+        'registered_sub2092_nativet1mapt1_rigid_mask_slice0.nii.gz',
+        'registered_sub2092_t2mapt2_rigid_mask_slice0.nii.gz'
     ]
 
     fixed_image = sitk.ReadImage(fixed_image_path)
@@ -112,7 +117,7 @@ def main():
         moving_image = sitk.ReadImage(moving_image_path)
         moving_mask = sitk.ReadImage(moving_mask_path)
         print(f"Registering {moving_image_path} to fixed image...")
-        registered_image, final_transform = perform_bspline_registration(fixed_image, moving_image, fixed_mask, moving_mask)
+        registered_image,registered_mask, final_transform = perform_bspline_registration(fixed_image, moving_image, fixed_mask=fixed_mask, moving_mask=moving_mask)
 
         # 添加调试信息
         if registered_image is not None:
@@ -120,8 +125,11 @@ def main():
         else:
             print(f"Error: Registered image is None for {moving_image_path}")
 
-        output_path = f"registered_{moving_image_path}"
+        output_path = f"registered_ffd_img_{moving_image_path}"
+
         sitk.WriteImage(registered_image, output_path)
+        output_path = f"registered_ffd_mask_{moving_image_path}"
+        sitk.WriteImage(registered_mask, output_path)
         print(f"Registered image saved to: {output_path}")
 
 
