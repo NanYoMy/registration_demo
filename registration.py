@@ -230,30 +230,26 @@ def register_images(fixed_image_path, moving_image_path, fixed_mask_path=None, m
         
         # 保存刚性配准结果
         sitk.WriteImage(rigid_result, f"{base}_rigid_slice{slice_index}.nii{ext}")
-        
-    # 2. 再进行B样条FFD配准
-    final_transform, final_metric = perform_bspline_registration(fixed_image, moving_image, rigid_transform, fixed_mask, moving_mask)
-
-    # 重采样移动图像
-    resampler = sitk.ResampleImageFilter()
-    resampler.SetReferenceImage(fixed_image)
-    resampler.SetInterpolator(sitk.sitkLinear)
-    resampler.SetTransform(final_transform)
-    transformed_moving_image = resampler.Execute(moving_image)
-
+    
     # 重采样移动mask
     if moving_mask is not None:
         mask_resampler = sitk.ResampleImageFilter()
         mask_resampler.SetReferenceImage(fixed_image)
         mask_resampler.SetInterpolator(sitk.sitkNearestNeighbor)
-        mask_resampler.SetTransform(final_transform)
+        mask_resampler.SetTransform(rigid_transform)
         transformed_moving_mask = mask_resampler.Execute(moving_mask)
         
         # 保存变换后的mask
-        output_mask_path = f"transformed_{os.path.basename(moving_mask.GetOrigin())}.nii.gz"
-        sitk.WriteImage(transformed_moving_mask, output_mask_path)
-        print(f"Transformed moving mask saved to: {output_mask_path}")
+        sitk.WriteImage(transformed_moving_mask, f"{base}_rigid_mask_slice{slice_index}.nii{ext}")
+        # print(f"Transformed moving mask saved to: {output_mask_path}")
 
+    
+    # 2. 再进行B样条FFD配准
+    final_transform, final_metric = perform_bspline_registration(fixed_image, moving_image, rigid_transform, fixed_mask, moving_mask)
+
+
+
+    
     # 保存最终结果
     if output_path:
         base, ext = os.path.splitext(output_path)
