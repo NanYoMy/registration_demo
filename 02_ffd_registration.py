@@ -47,7 +47,7 @@ def perform_bspline_registration(fixed_image, moving_image, fixed_mask=None, mov
         registration_method.SetMetricMovingMask(moving_mask)
 
     # 设置B样条变换
-    mesh_size = [max(3, int(sz/8)) for sz in fixed_image.GetSize()[:2]]
+    mesh_size = [max(3, int(sz/40)) for sz in fixed_image.GetSize()[:2]]
     transform = sitk.BSplineTransformInitializer(fixed_image, mesh_size, order=3)
     
     # 设置初始变换
@@ -99,6 +99,7 @@ def perform_bspline_registration(fixed_image, moving_image, fixed_mask=None, mov
 
 
 def main():
+    base_dir="./output"
     fixed_image_path = 'registered_sub2092_nativet1mapt1_fixed_slice0.nii.gz'
     moving_image_paths = [
         'registered_sub2092_nativet1mapt1_rigid_slice0.nii.gz',
@@ -109,13 +110,13 @@ def main():
         'registered_sub2092_t2mapt2_rigid_mask_slice0.nii.gz'
     ]
 
-    fixed_image = sitk.ReadImage(fixed_image_path)
+    fixed_image = sitk.ReadImage(os.path.join(base_dir,fixed_image_path))
     fixed_mask_path = 'registered_sub2092_nativet1mapt1_fixed_mask_slice0.nii.gz'
-    fixed_mask = sitk.ReadImage(fixed_mask_path)
+    fixed_mask = sitk.ReadImage(os.path.join(base_dir,fixed_mask_path))
 
     for moving_image_path, moving_mask_path in zip(moving_image_paths, moving_mask_paths):
-        moving_image = sitk.ReadImage(moving_image_path)
-        moving_mask = sitk.ReadImage(moving_mask_path)
+        moving_image = sitk.ReadImage(os.path.join(base_dir,moving_image_path))
+        moving_mask = sitk.ReadImage(os.path.join(base_dir,moving_mask_path))
         print(f"Registering {moving_image_path} to fixed image...")
         registered_image,registered_mask, final_transform = perform_bspline_registration(fixed_image, moving_image, fixed_mask=fixed_mask, moving_mask=moving_mask)
 
@@ -127,9 +128,10 @@ def main():
 
         output_path = f"registered_ffd_img_{moving_image_path}"
 
-        sitk.WriteImage(registered_image, output_path)
+        sitk.WriteImage(registered_image, os.path.join(base_dir,output_path))
+        
         output_path = f"registered_ffd_mask_{moving_image_path}"
-        sitk.WriteImage(registered_mask, output_path)
+        sitk.WriteImage(registered_mask, os.path.join(base_dir,output_path))
         print(f"Registered image saved to: {output_path}")
 
 

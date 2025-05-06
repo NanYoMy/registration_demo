@@ -94,73 +94,6 @@ def perform_rigid_registration(fixed_image, moving_image, fixed_mask=None, movin
         print("Using initial transform as fallback")
         return initial_transform
 
-def perform_bspline_registration(fixed_image, moving_image, initial_transform, fixed_mask=None, moving_mask=None):
-    """执行B样条FFD配准"""
-    # 确保输入图像和mask为浮点类型
-    fixed_image = sitk.Cast(fixed_image, sitk.sitkFloat32)
-    moving_image = sitk.Cast(moving_image, sitk.sitkFloat32)
-    
-    # 归一化图像到0-255
-    fixed_image = normalize_image(fixed_image)
-    moving_image = normalize_image(moving_image)
-    
-    # 确保mask也是浮点类型
-    if fixed_mask is not None:
-        fixed_mask = sitk.Cast(fixed_mask, sitk.sitkFloat32)
-    if moving_mask is not None:
-        moving_mask = sitk.Cast(moving_mask, sitk.sitkFloat32)
-
-    # 打印输入图像和mask的信息
-    print(f"Fixed Image Size: {fixed_image.GetSize()}, Type: {fixed_image.GetPixelIDTypeAsString()}, Min: {sitk.GetArrayFromImage(fixed_image).min()}, Max: {sitk.GetArrayFromImage(fixed_image).max()}")
-    print(f"Moving Image Size: {moving_image.GetSize()}, Type: {moving_image.GetPixelIDTypeAsString()}, Min: {sitk.GetArrayFromImage(moving_image).min()}, Max: {sitk.GetArrayFromImage(moving_image).max()}")
-    if fixed_mask is not None:
-        print(f"Fixed Mask Size: {fixed_mask.GetSize()}, Type: {fixed_mask.GetPixelIDTypeAsString()}, Min: {sitk.GetArrayFromImage(fixed_mask).min()}, Max: {sitk.GetArrayFromImage(fixed_mask).max()}")
-    if moving_mask is not None:
-        print(f"Moving Mask Size: {moving_mask.GetSize()}, Type: {moving_mask.GetPixelIDTypeAsString()}, Min: {sitk.GetArrayFromImage(moving_mask).min()}, Max: {sitk.GetArrayFromImage(moving_mask).max()}")
-
-    # 检查输入图像和mask的维度
-    if fixed_image.GetDimension() != 2 or moving_image.GetDimension() != 2:
-        raise ValueError("Both fixed and moving images must be 2D.")
-
-    registration_method = sitk.ImageRegistrationMethod()
-
-    # 设置相似度度量为均方误差
-    registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
-    
-    # 如果提供了mask，设置mask
-    if fixed_mask is not None and moving_mask is not None:
-        registration_method.SetMetricFixedMask(fixed_mask)
-        registration_method.SetMetricMovingMask(moving_mask)
-
-    # 设置B样条变换
-    mesh_size = [max(3, int(sz/16)) for sz in fixed_image.GetSize()[:2]]
-    transform = sitk.BSplineTransformInitializer(fixed_image, mesh_size, order=3)
-    
-    # 将刚性变换的结果作为初始变换
-    registration_method.SetInitialTransform(initial_transform, True)
-    registration_method.SetMovingInitialTransform(transform)
-
-    # 设置优化器
-    registration_method.SetOptimizerAsLBFGSB(
-        gradientConvergenceTolerance=1e-5,
-        numberOfIterations=100,
-        maximumNumberOfCorrections=5,
-        maximumNumberOfFunctionEvaluations=1000,
-        costFunctionConvergenceFactor=1e7)
-
-    # 设置多分辨率策略
-    registration_method.SetShrinkFactorsPerLevel([2, 1])
-    registration_method.SetSmoothingSigmasPerLevel([1, 0])
-    registration_method.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
-
-    # 设置插值方法
-    registration_method.SetInterpolator(sitk.sitkLinear)
-
-    # 禁用多线程
-    registration_method.SetNumberOfThreads(1)
-
-    print("Starting B-spline registration...")
-    return registration_method.Execute(fixed_image, moving_image)
 
 def register_images(fixed_image_path, moving_image_path, fixed_mask_path=None, moving_mask_path=None, output_path=None, slice_index=None):
     # 读取图像
@@ -243,28 +176,13 @@ def register_images(fixed_image_path, moving_image_path, fixed_mask_path=None, m
         sitk.WriteImage(transformed_moving_mask, f"{base}_rigid_mask_slice{slice_index}.nii{ext}")
         # print(f"Transformed moving mask saved to: {output_mask_path}")
 
-    
-    # 2. 再进行B样条FFD配准
-    final_transform, final_metric = perform_bspline_registration(fixed_image, moving_image, rigid_transform, fixed_mask, moving_mask)
 
-
-
-    
-    # 保存最终结果
-    if output_path:
-        base, ext = os.path.splitext(output_path)
-        if ext == '.gz':
-            base, _ = os.path.splitext(base)
-        output_2d_path = f"{base}_slice{slice_index}.nii{ext}"
-        
-        sitk.WriteImage(transformed_moving_image, output_2d_path)
-        print(f"Registered 2D image saved to: {output_2d_path}")
-    
-    return transformed_moving_image, final_transform
+    return rigid_result, rigid_transform
 
 def main():
     # 设置路径
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = "./data"
+    out_dir = "./output"
     fixed_image_path = os.path.join(base_dir, "sub2092_lge.nii.gz")
     fixed_mask_path = os.path.join(base_dir, "sub2092_lge_mask.nii.gz")
     
@@ -287,7 +205,7 @@ def main():
         
         # 创建输出文件名
         output_filename = f"registered_{moving_image}"
-        output_path = os.path.join(base_dir, output_filename)
+        output_path = os.path.join(out_dir, output_filename)
         
         print(f"\nRegistering {moving_image} to LGE image...")
         try:
